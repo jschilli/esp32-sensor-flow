@@ -1,3 +1,7 @@
+use std::ops::Deref;
+use std::thread::sleep;
+use std::time::SystemTime;
+
 use anyhow::Result;
 use esp_idf_hal::adc::attenuation;
 use esp_idf_hal::adc::config::Config;
@@ -7,24 +11,47 @@ use esp_idf_hal::adc::AdcDriver;
 use esp_idf_hal::adc::ADC1;
 use esp_idf_hal::gpio::*;
 use esp_idf_hal::peripherals::Peripherals;
-// use esp_idf_hal::task::*;
-use esp_idf_hal::timer::*;
-// use futures::lock::Mutex;
 use futures_util::*;
-use tokio::time::sleep;
-// use std::ops::DerefMut;
-// use std::sync::{Arc, Mutex};
-// use std::thread;
-// use std::time::Duration;
-use tokio::time::{self, Duration};
+
+use tokio::time::Duration;
+// mod window;
+// use window::SensorFlowExt;
+
+use sensor_stream::*;
 
 #[derive(Debug, PartialEq, Clone, Copy)]
-enum ButtonTypes {
+pub enum ButtonTypes {
     None,
     VolUp,
     VolDown,
     Play,
     Menu,
+}
+
+#[derive(Clone, Debug)]
+pub struct ButtonSensorData(SensorData<ButtonTypes>);
+
+impl PartialEq for ButtonSensorData {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.value == other.0.value
+    }
+}
+
+impl ButtonSensorData {
+    pub fn new(value: ButtonTypes) -> Self {
+        Self(SensorData {
+            value,
+            timestamp: SystemTime::now(),
+        })
+    }
+}
+
+impl Deref for ButtonSensorData {
+    type Target = SensorData<ButtonTypes>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 #[derive(Debug)]
 struct KeyConfig {
@@ -32,8 +59,6 @@ struct KeyConfig {
     min_adc_val: u16,
     max_adc_val: u16,
 }
-
-// impl Debug for KeyConfig {}
 
 const BUTTONS: [KeyConfig; 4] = [
     KeyConfig {
@@ -58,67 +83,34 @@ const BUTTONS: [KeyConfig; 4] = [
     },
 ];
 
-type Error = anyhow::Error;
+// type Error = anyhow::Error;
 
 pub fn sensor_reading<'a>(
     adc: &'a mut AdcDriver<'a, ADC1>,
     adc_pin: &'a mut esp_idf_hal::adc::AdcChannelDriver<'a, 3, Gpio1>,
-) -> impl Stream<Item = Result<ButtonTypes, Error>> + 'a {
+) -> impl Stream<Item = ButtonSensorData> + 'a {
     async_stream::stream! {
         let mut interval = tokio::time::interval(Duration::from_secs(1));
-            // let delay = time::sleep(Duration::from_secs(1));
             loop {
                 let mut result = ButtonTypes::None;
 
-                            interval.tick().await;
+                     interval.tick().await;
                 let button_adc = adc.read(adc_pin).unwrap();
-                println!("{:?}", button_adc);
+                // println!("{:?}", button_adc);
                 for button in BUTTONS.iter() {
-                    println!("{:?}", button);
+                    // println!("{:?}", button);
                     if button_adc >= button.min_adc_val && button_adc <= button.max_adc_val {
                         println!("Button pressed: {:?}", button.button);
-                        result = button.button;
                         // push adc values into stream!
-
-                        // let buttons and other interested parties consume stream and react `on_change`
+                        result = button.button;
                     }
             }
-            yield Ok(result);
+            yield ButtonSensorData::new(result)
 
         }
     }
 }
 
-// async fn sensor_readings<'a>(
-//     adc: Arc<AdcDriver<'_, ADC1>>,
-//     adc_pin: Arc<Mutex<esp_idf_hal::adc::AdcChannelDriver<'_, 3, Gpio1>>>,
-//     id: u8,
-// ) -> impl futures_util::Stream<Item = ButtonTypes> {
-//     stream::unfold(0, move |count| {
-//         let adc = Arc::clone(&adc);
-//         // let adc_pin = Arc::clone(adc_pin);
-//         let mut adc_pin = adc_pin.lock().unwrap();
-//         let delay = time::sleep(Duration::from_secs(1));
-//         async move {
-//             delay.await;
-//             let mut result = ButtonTypes::None;
-//             // thread::sleep(Duration::from_millis(1000));
-//             let button_adc = adc.read(adc_pin.deref_mut()).unwrap();
-//             for button in BUTTONS.iter() {
-//                 if button_adc >= button.min_adc_val && button_adc <= button.max_adc_val {
-//                     println!("Button pressed: {:?}", button.button);
-//                     result = button.button;
-//                     // push adc values into stream!
-
-//                     // let buttons and other interested parties consume stream and react `on_change`
-//                 }
-//             }
-//             // let reading = format!("Sensor {}: Temperature {}°C", id, 20 + count % 5);
-//             Some((result, count + 1))
-//         }
-//     })
-// }
-// #[tokio::main]
 fn main() -> anyhow::Result<()> {
     // It is necessary to call this function once. Otherwise some patches to the runtime
     // implemented by esp-idf-sys might not link properly. See https://github.com/esp-rs/esp-idf-template/issues/71
@@ -148,46 +140,18 @@ fn main() -> anyhow::Result<()> {
 async fn async_main() -> Result<()> {
     let peripherals = Peripherals::take()?;
 
-    let mut led = PinDriver::output(peripherals.pins.gpio3)?;
-    let mut timer = TimerDriver::new(peripherals.timer00, &TimerConfig::new())?;
+    // let mut led = PinDriver::output(peripherals.pins.gpio3)?;
+    // let mut timer = TimerDriver::new(peripherals.timer00, &TimerConfig::new())?;
 
     let mut adc = AdcDriver::new(peripherals.adc1, &Config::new().calibration(true))?;
 
-    // let mut pin1 = adc1_config.enable_pin_with_cal::<_, AdcCal>(io.pins.gpio1.into_analog(), atten);
     let mut adc_pin: esp_idf_hal::adc::AdcChannelDriver<{ attenuation::DB_11 }, _> =
         AdcChannelDriver::new(peripherals.pins.gpio1)?;
-    // let mut adc_pin = Arc::new(Mutex::new(adc_pin));
-    let button_stream = sensor_reading(&mut adc, &mut adc_pin);
+    let button_stream = sensor_reading(&mut adc, &mut adc_pin).window::<ButtonSensorData>();
     // loop {
     pin_mut!(button_stream); // StreamExt::next requires that the stream be Unpin
-    while let Some(Ok(msg)) = button_stream.next().await {
+    while let Some(msg) = button_stream.next().await {
         println!("{:?}", msg);
     }
     Ok(())
-    // you can change the sleep duration depending on how often you want to sample
-    // thread::sleep(Duration::from_millis(1000));
-    // let button_adc = adc.read(&mut adc_pin)?;
-    // for button in BUTTONS.iter() {
-    //     if button_adc >= button.min_adc_val && button_adc <= button.max_adc_val {
-    //         println!("Button pressed: {:?}", button.button);
-    //         // push adc values into stream!
-
-    //         // let buttons and other interested parties consume stream and react `on_change`
-    //     }
-    // }
-
-    // println!("ADC value: {}", adc.read(&mut adc_pin)?);
-    // }
-    // block_on(async {
-    //     loop {
-    //         led.set_high()?;
-
-    //         timer.delay(timer.tick_hz()).await?;
-
-    //         led.set_low()?;
-
-    //         timer.delay(timer.tick_hz()).await?;
-    //     }
-    // })
-    // log::info!("Hello, world!");
 }

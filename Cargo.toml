@@ -6,6 +6,14 @@ edition = "2021"
 resolver = "2"
 rust-version = "1.71"
 
+
+[workspace.package]
+authors = ["jeff.schilling@gmail.com"]
+categories = ["esp32"]
+edition = "2021"
+license = "Apache-2.0"
+repository = ""
+
 [profile.release]
 opt-level = "s"
 
@@ -36,13 +44,31 @@ futures = "^0.3"
 log = { version = "0.4", default-features = false }
 esp-idf-svc = { version = "0.48", default-features = false }
 esp-idf-hal = "0.43.1"
+sensor-stream = { workspace = true }
 tokio = { version = "1.35", features = [
     "rt",
     "macros",
     "time",
     "rt-multi-thread",
 ] }
+pin-project-lite = "0.2"
+
+[workspace.dependencies]
+anyhow = "1.0.80"
+async-stream = "0.3.5"
+futures-core = "^0.3"
+futures-util = "^0.3"
+futures = "^0.3"
+log = { version = "0.4", default-features = false }
+esp-idf-svc = { version = "0.48", default-features = false }
+esp-idf-hal = "0.43.1"
+tokio = { version = "1.35", default-features = false }
+sensor-stream = { path = "./crates/sensor_flow" }
+pin-project-lite = "0.2"
 
 
 [build-dependencies]
 embuild = "0.31.3"
+
+[workspace]
+members = ["crates/*"]

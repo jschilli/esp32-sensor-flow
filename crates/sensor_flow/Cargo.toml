@@ -1,0 +1,22 @@
+[package]
+name = "sensor-stream"
+authors.workspace = true
+categories.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tokio = { workspace = true, features = [
+    "rt",
+    "macros",
+    "time",
+    "rt-multi-thread",
+] }
+async-stream = { workspace = true }
+futures-core = { workspace = true }
+futures-util = { workspace = true }
+futures = { workspace = true }
+pin-project-lite = { workspace = true }
