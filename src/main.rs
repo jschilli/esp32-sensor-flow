@@ -149,8 +149,8 @@ async fn async_main() -> Result<()> {
     };
 
     let arc_buttons = Arc::new(Mutex::new(buttons));
-    let arc_buttons_clone2 = Arc::clone(&arc_buttons);
 
+    let arc_buttons_clone2 = Arc::clone(&arc_buttons);
     let menu_button_flow = async_stream::stream! {
 
         let mut interval = tokio::time::interval(Duration::from_millis(100));
@@ -162,7 +162,6 @@ async fn async_main() -> Result<()> {
        }
     };
 
-    // let button_stream = sensor_reading(&mut adc, &mut adc_pin).window::<ButtonSensorData>();
     let arc_buttons_clone = Arc::clone(&arc_buttons);
     let button_reader = tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_millis(1000));
@@ -187,20 +186,24 @@ async fn async_main() -> Result<()> {
                         .set_button_state(button.button, false);
                 }
             }
-            // println!("{:?}", &arc_buttons_clone);
         }
     });
 
+    // Create a `window` over the prior value and the current value
     let menu_button_flow = menu_button_flow.window::<bool>();
+    // The following is `goes_active` - it emits true only when the button is pressed
+    let menu_button_flow = menu_button_flow.filter_map(|(prev, current)| async move {
+        if !prev && current {
+            Some(true)
+        } else {
+            None
+        }
+    });
     pin_mut!(menu_button_flow);
     while let Some(state) = menu_button_flow.next().await {
         println!("menu state: {:?}", state);
     }
-    // loop {
-    // pin_mut!(button_stream); // StreamExt::next requires that the stream be Unpin
-    // while let Some(msg) = button_stream.next().await {
-    //     println!("{:?}", msg);
-    // }
+
     join!(button_reader);
     Ok(())
 }

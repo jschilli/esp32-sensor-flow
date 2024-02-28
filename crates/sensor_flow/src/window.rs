@@ -118,16 +118,8 @@ where
                     Some(pv) => {
                         // A value is available
                         prior_value = pv.clone();
-                        // Is it different from last one?
-                        if prior_value != v {
-                            *this.prior_value = Some(v_copy);
-                            return Poll::Ready(Some((prior_value, v)));
-                        } else {
-                            // No it isn't so we need to wait for next value
-                            // Tell the waker that we're elgible to be polled again
-                            cx.waker().wake_by_ref();
-                            return Poll::Pending;
-                        }
+                        *this.prior_value = Some(v_copy);
+                        return Poll::Ready(Some((prior_value, v)));
                     }
                     None => {
                         // No value available but we're not ready to quit
