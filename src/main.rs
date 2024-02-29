@@ -153,7 +153,7 @@ async fn async_main() -> Result<()> {
 
     let arc_buttons_clone = Arc::clone(&arc_buttons);
     let button_reader = tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_millis(1000));
+        let mut interval = tokio::time::interval(Duration::from_millis(100));
         loop {
             interval.tick().await;
             let button_adc = adc.read(&mut adc_pin).unwrap();
@@ -178,49 +178,50 @@ async fn async_main() -> Result<()> {
         }
     });
 
-    // Menu button flow
-    let arc_buttons_clone2 = Arc::clone(&arc_buttons);
-    // We are emitting the menu button state every 100ms
-    let menu_button_flow = async_stream::stream! {
-        let mut interval = tokio::time::interval(Duration::from_millis(100));
-        loop {
-               interval.tick().await;
-               let button_val = arc_buttons_clone2.lock().unwrap().menu;
-            //    println!("yielding {:?} {:?}", button_val, &arc_buttons_clone2);
-               yield button_val
-       }
-    };
-    // Create a `window` over the prior value and the current value
-    // pin_mut!(menu_button_goes_active);
-    // while let Some(state) = menu_button_goes_active.next().await {
-    //     println!("menu state: {:?}", state);
-    // }
+    // // Menu button flow
+    // let arc_buttons_clone2 = Arc::clone(&arc_buttons);
+    // // We are emitting the menu button state every 100ms
+    // let menu_button_flow = async_stream::stream! {
+    //     let mut interval = tokio::time::interval(Duration::from_millis(100));
+    //     loop {
+    //            interval.tick().await;
+    //            let button_val = arc_buttons_clone2.lock().unwrap().menu;
+    //         //    println!("yielding {:?} {:?}", button_val, &arc_buttons_clone2);
+    //            yield button_val
+    //    }
+    // };
 
-    // Aspirational syntax
-    let arc_buttons_clone2 = Arc::clone(&arc_buttons);
-
+    let arc_buttons = Arc::clone(&arc_buttons);
+    // Aspirational syntax <--- Now working
     let menu_button_flow = SensorStream::<_, _, bool>::new(
-        arc_buttons_clone2,
-        |buttons| buttons.menu,
-        Duration::from_millis(100),
+        arc_buttons,                // The resource from which we are reading
+        |buttons| buttons.menu, // buttons is the unwrapped resource, buttons.menu is the closure we're executing against that
+        Duration::from_millis(100), // The interval at which we are reading the resource
     );
 
-    let menu_button_goes_active =
-        menu_button_flow
-            .window::<bool>()
-            .filter_map(|(prev, current)| async move {
-                if !prev && current {
-                    Some(true)
-                } else {
-                    None
-                }
-            });
-    pin_mut!(menu_button_goes_active);
-    while let Some(state) = menu_button_goes_active.next().await {
-        println!("stream menu state: {:?}", state);
-    }
+    let menu_button = menu_button_flow.goes_active::<bool>();
+    when(menu_button, &mut |state| {
+        println!("Menu button went active: {:?}", state);
+    })
+    .await;
+
     join!(button_reader);
     Ok(())
+}
+
+use futures::Stream;
+
+async fn when<S, F>(stream: S, f: &mut F)
+where
+    S: Stream,
+    F: FnMut(S::Item),
+{
+    let mut stream = stream;
+    pin_mut!(stream);
+
+    while let Some(item) = stream.next().await {
+        f(item);
+    }
 }
 
 struct SensorStream<T, F, R>

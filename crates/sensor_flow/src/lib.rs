@@ -1,4 +1,4 @@
-use std::time::SystemTime;
+use std::{ops::Not, time::SystemTime};
 
 #[allow(unused_imports)]
 use futures::stream::StreamExt; // Required for trait extension
@@ -129,6 +129,26 @@ where
         <Self as Stream>::Item: std::convert::Into<T> + Clone + PartialEq,
     {
         assert_stream::<(Self::Item, Self::Item), _>(Window::<Self>::new(self))
+    }
+
+    fn goes_active<T>(self) -> impl Stream<Item = Self::Item>
+    where
+        Self: Sized,
+        <Self as Stream>::Item: std::convert::Into<T> + Clone + PartialEq,
+        T: std::ops::Not,
+        bool: From<<<Self as Stream>::Item as std::ops::Not>::Output>,
+        bool: From<<Self as Stream>::Item>,
+        <Self as Stream>::Item: Not, // <Self as Stream>::Item: std::convert::Into<T> + Clone + PartialEq,
+    {
+        let x = self.window().filter_map(|(prev, current)| async move {
+            let current_cmp = current.clone();
+            if prev.not().into() && Into::<bool>::into(current) {
+                Some(current_cmp)
+            } else {
+                None
+            }
+        });
+        x
     }
 }
 
