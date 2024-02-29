@@ -2,6 +2,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use std::sync::Mutex;
+use std::sync::MutexGuard;
 use std::thread::sleep;
 use std::time::SystemTime;
 
@@ -150,18 +151,6 @@ async fn async_main() -> Result<()> {
 
     let arc_buttons = Arc::new(Mutex::new(buttons));
 
-    let arc_buttons_clone2 = Arc::clone(&arc_buttons);
-    let menu_button_flow = async_stream::stream! {
-
-        let mut interval = tokio::time::interval(Duration::from_millis(100));
-        loop {
-               interval.tick().await;
-               let button_val = arc_buttons_clone2.lock().unwrap().menu;
-            //    println!("yielding {:?} {:?}", button_val, &arc_buttons_clone2);
-               yield button_val
-       }
-    };
-
     let arc_buttons_clone = Arc::clone(&arc_buttons);
     let button_reader = tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_millis(1000));
@@ -189,21 +178,77 @@ async fn async_main() -> Result<()> {
         }
     });
 
+    // Menu button flow
+    let arc_buttons_clone2 = Arc::clone(&arc_buttons);
+    // We are emitting the menu button state every 100ms
+    let menu_button_flow = async_stream::stream! {
+        let mut interval = tokio::time::interval(Duration::from_millis(100));
+        loop {
+               interval.tick().await;
+               let button_val = arc_buttons_clone2.lock().unwrap().menu;
+            //    println!("yielding {:?} {:?}", button_val, &arc_buttons_clone2);
+               yield button_val
+       }
+    };
     // Create a `window` over the prior value and the current value
-    let menu_button_flow = menu_button_flow.window::<bool>();
-    // The following is `goes_active` - it emits true only when the button is pressed
-    let menu_button_flow = menu_button_flow.filter_map(|(prev, current)| async move {
-        if !prev && current {
-            Some(true)
-        } else {
-            None
-        }
-    });
-    pin_mut!(menu_button_flow);
-    while let Some(state) = menu_button_flow.next().await {
-        println!("menu state: {:?}", state);
-    }
+    // pin_mut!(menu_button_goes_active);
+    // while let Some(state) = menu_button_goes_active.next().await {
+    //     println!("menu state: {:?}", state);
+    // }
 
+    // Aspirational syntax
+    let arc_buttons_clone2 = Arc::clone(&arc_buttons);
+
+    let menu_button_flow = SensorStream::<_, _, bool>::new(
+        arc_buttons_clone2,
+        |buttons| buttons.menu,
+        Duration::from_millis(100),
+    );
+
+    let menu_button_goes_active =
+        menu_button_flow
+            .window::<bool>()
+            .filter_map(|(prev, current)| async move {
+                if !prev && current {
+                    Some(true)
+                } else {
+                    None
+                }
+            });
+    pin_mut!(menu_button_goes_active);
+    while let Some(state) = menu_button_goes_active.next().await {
+        println!("stream menu state: {:?}", state);
+    }
     join!(button_reader);
     Ok(())
 }
+
+struct SensorStream<T, F, R>
+where
+    F: Fn(MutexGuard<'_, T>) -> R,
+{
+    state: Arc<Mutex<T>>,
+    get_state: F,
+    interval: Duration,
+    inner: Box<dyn Stream<Item = R>>,
+}
+
+impl<T, F, R> SensorStream<T, F, R>
+where
+    F: Fn(MutexGuard<'_, T>) -> R,
+{
+    fn new(state: Arc<Mutex<T>>, get_state: F, interval: Duration) -> impl Stream<Item = R> {
+        let mut interval = tokio::time::interval(interval);
+        let stream = async_stream::stream! {
+            loop {
+                interval.tick().await;
+                let sensor = state.lock().unwrap();
+                let button_val = (get_state)(sensor);
+                yield button_val
+            }
+        };
+        stream
+    }
+}
+
+// impl<R> SensorStream<R> {}
